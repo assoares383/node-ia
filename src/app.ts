@@ -1,7 +1,9 @@
 import dotenv from "dotenv";
 import express from "express";
 import OpenAI from "openai";
+import { zodResponseFormat } from "openai/helpers/zod";
 import z from "zod";
+
 dotenv.config();
 
 const app = express();
@@ -11,12 +13,16 @@ const client = new OpenAI({
 
 app.use(express.json());
 
+const schema = z.object({
+  produtos: z.array(z.string()),
+});
+
 app.post("/generate", async (req, res) => {
   try {
-    const completion = await client.chat.completions.create({
+    const completion = await client.chat.completions.parse({
       model: "gpt-4o-mini",
       max_completion_tokens: 100,
-      response_format: { type: "json_object" },
+      response_format: zodResponseFormat(schema, "produtos_schema"),
       messages: [
         {
           role: "developer",
@@ -30,22 +36,13 @@ app.post("/generate", async (req, res) => {
       ],
     });
 
-    const output = JSON.parse(completion.choices[0].message.content ?? "");
-
-    const schema = z.object({
-      produtos: z.array(z.string()),
-    });
-
-    const result = schema.safeParse(output);
-
-    if (!result.success) {
-      return res.status(400).json({
-        error: "Resposta inválida da IA",
-        details: result.error.errors,
-      });
+    if (!completion.choices[0].message.refusal) {
+      return res
+        .status(400)
+        .json({ error: "Erro ao processar a resposta da IA" });
     }
 
-    res.json(output);
+    res.json(completion.choices[0].message.parsed?.produtos);
   } catch (error) {
     console.error("Erro ao chamar a API:", error);
     res.status(500).json({ error: "Erro ao chamar a API" });
